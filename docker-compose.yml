@@ -1,0 +1,104 @@
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Design decision
+# ---------------------------------------------------------------------------
+# One compose file brings up the full stack with `docker compose up --build`:
+# PostgreSQL (standing in for RDS), the FastAPI backend, the Nginx-served
+# React frontend, and an optional Prometheus + Grafana monitoring pair.
+# `depends_on` with healthchecks ensures the backend never starts accepting
+# traffic before Postgres is actually ready (avoids the classic "connection
+# refused on cold start" race condition in Compose).
+# ---------------------------------------------------------------------------
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sales-intel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sales_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sales_secret_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-sales_revenue_intelligence}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/sql:/docker-entrypoint-initdb.d/sql-reference:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sales_admin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sales-intel-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sales-intel-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      POSTGRES_SERVER: db
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-sales_admin}:${POSTGRES_PASSWORD:-sales_secret_pw}@db:5432/${POSTGRES_DB:-sales_revenue_intelligence}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - sales-intel-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sales-intel-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    networks:
+      - sales-intel-net
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: sales-intel-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+    networks:
+      - sales-intel-net
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: sales-intel-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - sales-intel-net
+
+networks:
+  sales-intel-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  grafana_data:

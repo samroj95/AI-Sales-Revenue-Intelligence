@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node / frontend
+node_modules/
+dist/
+frontend/.vite/
+
+# Environment secrets - NEVER commit real .env files
+.env
+backend/.env
+frontend/.env
+!*.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Data artifacts
+*.sqlite3
+backend/data/*.csv
